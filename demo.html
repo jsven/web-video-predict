@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TensorFlow.js YOLO Object Detection</title>
+  <style>
+    #video {
+      width: 640px;
+      height: 480px;
+    }
+    canvas {
+      position: absolute;
+    }
+  </style>
+</head>
+<body>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script> <!-– Or your preferred YOLO model -->
+<script>
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  load();
+  // navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  function load() {
+    cocoSsd.load().then(model => {
+      console.log('Model loaded!');
+
+      // Start webcam and run detection loop
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        .then(stream => {
+          video.srcObject = stream;
+          video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            detect(model);
+          };
+        })
+        .catch(error => {
+          console.error('Error accessing webcam:', error);
+        });
+
+      async function detect(model) {
+        const predictions = await model.detect(video);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (predictions.length > 0) {
+          predictions.forEach(prediction => {
+            const [x, y, w, h] = prediction.bbox;
+            const text = `${prediction.class} ${Math.round(prediction.score * 100)}%`;
+
+            ctx.strokeStyle = 'green';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, w, h);
+
+            ctx.fillStyle = 'green';
+            ctx.font = '16px Arial';
+            ctx.fillText(text, x, y - 10);
+          });
+        }
+
+        requestAnimationFrame(() => detect(model));
+      }
+    });
+  }
+  // Load the YOLO model (replace with your actual model path)
+  // Note:  You'll need to host your model or use a CDN
+  // coco-ssd is used here as a placeholder, replace with your YOLO model
+</script>
+</body>
+</html>

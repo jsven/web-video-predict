@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>image TensorFlow.js YOLO Object Detection</title>
+	<style>
+      #video {
+          width: 640px;
+          height: 640px;
+      }
+
+      canvas {
+          position: absolute;
+          left: 8px;
+          height: 640px;
+          width: 640px;
+      }
+	</style>
+</head>
+<body>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+<button onclick="runTime = false">暂停</button>
+<button onclick="runTime = true">开始</button>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.0.0/turf.min.js"></script>
+<script type="module">
+	import ObbPredict from './load.js';
+	import {classIndex, classNames} from './labels.js';
+	import {resultToBbox} from './v0-nms/resultToBbox.js';
+	import {drawBbox} from './drawBbox.js';
+
+	const imageSize = [640, 640];
+	window.runTime = false;
+	const path = 'hyj_1230_S640_20250102093839_web_model';
+	const video = document.getElementById('video');
+	const canvas = document.getElementById('canvas');
+	const obbPredict = new ObbPredict(tf, `./model-version/${path}/model.json`, {imageSize});
+	const context = document.getElementById('canvas').getContext('2d');
+	load();
+
+	async function load() {
+
+		await obbPredict.loadYOLOModel();
+		alert('模型加载完成')
+		navigator.mediaDevices.getUserMedia({video: true, audio: false})
+			.then(stream => {
+				video.srcObject = stream;
+				video.onloadedmetadata = () => {
+					canvas.width = video.videoWidth;
+					canvas.height = video.videoHeight;
+					detect();
+				};
+			})
+			.catch(error => {
+				console.error('Error accessing webcam:', error);
+			});
+		async function realDetect() {
+			if(!runTime){
+				return;
+			}
+			const result = await obbPredict.predict(video);
+			let parseRs;
+			try {
+				parseRs = resultToBbox(result, classIndex.length);
+			} catch (e) {
+				console.log('结果转换错误')
+			}
+			parseRs && parseRs.length > 0 && drawBbox(parseRs, context, imageSize, classNames);
+		}
+		async function detect() {
+			await realDetect();
+			requestAnimationFrame(() => detect());
+		}
+	}
+</script>
+</body>
+</html>

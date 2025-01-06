@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>image TensorFlow.js YOLO Object Detection</title>
+	<style>
+      #video {
+          width: 640px;
+          height: 640px;
+      }
+
+      canvas {
+          position: absolute;
+					left: 8px;
+					/*height: 640px;*/
+					/*width: 640px;*/
+      }
+	</style>
+</head>
+<body>
+<img id="video" src="img_1.png"></img>
+<canvas id="canvas"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.0.0/turf.min.js"></script>
+<script type="module">
+	import ObbPredict from './load.js';
+	import {classIndex, classNames} from './labels.js';
+	import {resultToBbox} from './v0-nms/resultToBbox.js';
+	import {drawBbox} from './drawBbox.js';
+	const imageSize = [640, 640];
+	window.runTime = 0;
+	const path = 'hyj_1230_S640_20250102093839_web_model'
+	const video = document.getElementById('video');
+	const canvas = document.getElementById('canvas');
+	const obbPredict = new ObbPredict(tf, `./model-version/${path}/model.json`, {imageSize});
+	load();
+	async function load() {
+		await obbPredict.loadYOLOModel();
+		detect();
+		async function detect() {
+			const result = await obbPredict.predict(video);
+			const parseRs = resultToBbox(result, classIndex.length);
+			drawBbox(parseRs, document.getElementById('canvas').getContext('2d'), imageSize, classNames);
+		}
+	}
+</script>
+</body>
+</html>

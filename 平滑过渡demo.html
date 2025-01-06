@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iOS Style Object Detection</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #video {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #canvas {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<script>
+  class IOSStyleBoxSmoother {
+    constructor(options = {}) {
+      this.options = {
+        alpha: 0.85,           // 平滑系数
+        minConfidence: 0.35,   // 最小置信度
+        cornerRadius: 10,      // 圆角半径
+        lineWidth: 2.5,        // 线条宽度
+        dashLength: 5,         // 虚线长度
+        gapLength: 3,          // 虚线间隔
+        boxColor: '#ffcd00',   // iOS黄色
+        labelColor: '#ffcd00', // 标签颜色
+        labelBackground: 'rgba(0, 0, 0, 0.6)',
+        fadeInDuration: 1,   // 淡入动画时长(ms)
+        fadeOutDuration: 1,  // 淡出动画时长(ms)
+        ...options
+      };
+
+      this.tracks = new Map();
+      this.nextTrackId = 1;
+    }
+
+    smooth(predictions) {
+      const currentTime = Date.now();
+      const results = [];
+      const assignedTracks = new Set();
+
+      // 更新现有跟踪
+      predictions.forEach(pred => {
+        if (pred.score < this.options.minConfidence) return;
+
+        let bestTrackId = null;
+        let bestIOU = -1;
+
+        // 查找最佳匹配的跟踪
+        for (const [id, track] of this.tracks.entries()) {
+          if (assignedTracks.has(id)) continue;
+
+          const iou = this.calculateIOU(track.targetBox || track.currentBox, pred.bbox);
+          if (iou > 0.3 && iou > bestIOU) {
+            bestIOU = iou;
+            bestTrackId = id;
+          }
+        }
+
+        if (bestTrackId !== null) {
+          const track = this.tracks.get(bestTrackId);
+          track.targetBox = pred.bbox;
+          track.class = pred.class;
+          track.score = pred.score;
+          track.lastUpdateTime = currentTime;
+          track.opacity = Math.min(track.opacity + 0.15, 1);
+          assignedTracks.add(bestTrackId);
+          results.push(this.updateTrack(track, bestTrackId));
+        } else {
+          // 创建新跟踪
+          const trackId = this.nextTrackId++;
+          const track = {
+            currentBox: pred.bbox,
+            targetBox: pred.bbox,
+            class: pred.class,
+            score: pred.score,
+            lastUpdateTime: currentTime,
+            opacity: 0,
+            creationTime: currentTime
+          };
+          this.tracks.set(trackId, track);
+          results.push(this.updateTrack(track, trackId));
+        }
+      });
+
+      // 更新未匹配的跟踪
+      for (const [id, track] of this.tracks.entries()) {
+        if (!assignedTracks.has(id)) {
+          const timeSinceUpdate = currentTime - track.lastUpdateTime;
+          if (timeSinceUpdate < this.options.fadeOutDuration) {
+            track.opacity = Math.max(0, track.opacity - 0.1);
+            if (track.opacity > 0) {
+              results.push(this.updateTrack(track, id));
+            }
+          } else {
+            this.tracks.delete(id);
+          }
+        }
+      }
+
+      return results;
+    }
+
+    updateTrack(track, id) {
+      if (!track.currentBox) {
+        track.currentBox = track.targetBox;
+      }
+
+      // 平滑过渡到目标位置
+      track.currentBox = track.currentBox.map((current, i) => {
+        return current + (track.targetBox[i] - current) * (1 - this.options.alpha);
+      });
+
+      return {
+        bbox: track.currentBox,
+        class: track.class,
+        score: track.score,
+        opacity: track.opacity,
+        id
+      };
+    }
+
+    calculateIOU(box1, box2) {
+      const [x1, y1, w1, h1] = box1;
+      const [x2, y2, w2, h2] = box2;
+
+      const xA = Math.max(x1, x2);
+      const yA = Math.max(y1, y2);
+      const xB = Math.min(x1 + w1, x2 + w2);
+      const yB = Math.min(y1 + h1, y2 + h2);
+
+      const intersectionArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+      const box1Area = w1 * h1;
+      const box2Area = w2 * h2;
+
+      return intersectionArea / (box1Area + box2Area - intersectionArea);
+    }
+  }
+
+  class ObjectDetector {
+    constructor() {
+      this.video = document.getElementById('video');
+      this.canvas = document.getElementById('canvas');
+      this.ctx = this.canvas.getContext('2d');
+      this.smoother = new IOSStyleBoxSmoother();
+      this.isDetecting = false;
+
+      this.handleResize = this.handleResize.bind(this);
+      new ResizeObserver(this.handleResize).observe(document.querySelector('.container'));
+      window.addEventListener('resize', this.handleResize);
+    }
+
+    handleResize() {
+      const container = document.querySelector('.container');
+      this.canvas.width = container.clientWidth;
+      this.canvas.height = container.clientHeight;
+    }
+
+    drawRoundedRect(x, y, width, height, radius) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(x + radius, y);
+      this.ctx.lineTo(x + width - radius, y);
+      this.ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      this.ctx.lineTo(x + width, y + height - radius);
+      this.ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      this.ctx.lineTo(x + radius, y + height);
+      this.ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      this.ctx.lineTo(x, y + radius);
+      this.ctx.quadraticCurveTo(x, y, x + radius, y);
+      this.ctx.closePath();
+    }
+
+    drawDashedRoundedRect(x, y, width, height, options) {
+      const { cornerRadius, lineWidth, dashLength, gapLength, opacity } = options;
+
+      this.ctx.save();
+      this.ctx.strokeStyle = `rgba(255, 205, 0, ${opacity})`;
+      this.ctx.lineWidth = lineWidth;
+      this.ctx.setLineDash([dashLength, gapLength]);
+
+      this.drawRoundedRect(x, y, width, height, cornerRadius);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
+    drawPredictions(predictions) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+      predictions.forEach(prediction => {
+        const [x, y, width, height] = prediction.bbox;
+        const text = `${prediction.class}`;
+
+        // 绘制虚线圆角矩形
+        this.drawDashedRoundedRect(x, y, width, height, {
+          cornerRadius: this.smoother.options.cornerRadius,
+          lineWidth: this.smoother.options.lineWidth,
+          dashLength: this.smoother.options.dashLength,
+          gapLength: this.smoother.options.gapLength,
+          opacity: prediction.opacity
+        });
+
+        // 绘制标签
+        this.ctx.save();
+        this.ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+        const textWidth = this.ctx.measureText(text).width;
+        const padding = 5;
+        const labelHeight = 20;
+
+        // 绘制标签背景
+        this.ctx.fillStyle = `rgba(0, 0, 0, ${prediction.opacity * 0.6})`;
+        this.ctx.fillRect(
+          x - 1,
+          y - labelHeight - 2,
+          textWidth + padding * 2 + 2,
+          labelHeight
+        );
+
+        // 绘制标签文本
+        this.ctx.fillStyle = `rgba(255, 205, 0, ${prediction.opacity})`;
+        this.ctx.fillText(text, x + padding, y - 7);
+        this.ctx.restore();
+      });
+    }
+
+    async init() {
+      try {
+        this.model = await cocoSsd.load();
+        console.log('Model loaded');
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        });
+
+        this.video.srcObject = stream;
+
+        return new Promise((resolve) => {
+          this.video.onloadedmetadata = () => {
+            this.handleResize();
+            resolve();
+          };
+        });
+      } catch (error) {
+        console.error('Initialization error:', error);
+        throw error;
+      }
+    }
+
+    async detect() {
+      if (!this.isDetecting) return;
+
+      try {
+        const predictions = await this.model.detect(this.video);
+        const smoothedPredictions = this.smoother.smooth(predictions);
+        this.drawPredictions(smoothedPredictions);
+      } catch (error) {
+        console.error('Detection error:', error);
+      }
+
+      requestAnimationFrame(() => this.detect());
+    }
+
+    start() {
+      if (!this.isDetecting) {
+        this.isDetecting = true;
+        this.detect();
+      }
+    }
+
+    stop() {
+      this.isDetecting = false;
+    }
+  }
+
+  async function startApp() {
+    try {
+      const detector = new ObjectDetector();
+      await detector.init();
+      detector.start();
+    } catch (error) {
+      console.error('Application startup error:', error);
+    }
+  }
+
+  startApp();
+</script>
+</body>
+</html>

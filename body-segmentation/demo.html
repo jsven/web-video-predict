@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>TensorFlow.js YOLO Object Detection</title>
+	<style>
+      #video {
+          width: 640px;
+          height: 480px;
+      }
+
+      canvas {
+          position: absolute;
+      }
+	</style>
+</head>
+<body>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+<!-- Require the peer dependencies of body-segmentation. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+
+<!-- You must explicitly require a TF.js backend if you're not using the TF.js union bundle. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+<script>
+	window.consoleLog = true;
+	const video = document.getElementById('video');
+	const canvas = document.getElementById('canvas');
+	const ctx = canvas.getContext('2d');
+	load();
+
+	// navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+	async function load() {
+
+		const model = bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation;
+		const segmenterConfig = {
+			runtime: 'tfjs',
+		};
+		segmenter = await bodySegmentation.createSegmenter(model, segmenterConfig);
+		navigator.mediaDevices.getUserMedia({video: true, audio: false})
+			.then(stream => {
+				video.srcObject = stream;
+				video.onloadedmetadata = () => {
+					canvas.width = video.videoWidth;
+					canvas.height = video.videoHeight;
+					detect(segmenter);
+				};
+			})
+			.catch(error => {
+				console.error('Error accessing webcam:', error);
+			});
+    async function detect(model) {
+      const segmentationConfig = {flipHorizontal: false};
+      const people = await model.segmentPeople(video, segmentationConfig);
+			if(consoleLog) {
+				console.log(people);
+				console.log(people[0].maskValueToLabel())
+			}
+      requestAnimationFrame(() => detect(model));
+    }
+	}
+
+	// Load the YOLO model (replace with your actual model path)
+	// Note:  You'll need to host your model or use a CDN
+	// coco-ssd is used here as a placeholder, replace with your YOLO model
+</script>
+</body>
+</html>

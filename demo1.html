@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Webcam Stream</title>
+  <style>
+    #video {
+      width: 640px;
+      height: 480px;
+    }
+  </style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+
+<script>
+  const video = document.getElementById('video');
+
+  navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    .then(stream => {
+      video.srcObject = stream;
+    })
+    .catch(error => {
+      console.error('Error accessing webcam:', error);
+      // Handle the error, e.g., display an error message to the user.
+      const errorMessage = document.createElement('p');
+      errorMessage.textContent = 'Error accessing webcam. Please check your browser permissions.';
+      document.body.appendChild(errorMessage);
+    });
+</script>
+
+</body>
+</html>
